@@ -69,6 +69,19 @@ PIN_CONFIGS = {
 
 
 # ==============================================================================
+# MOUSE WHEEL SCROLLING UTILITY
+# ==============================================================================
+def bind_mouse_wheel_recursive(widget, canvas):
+    """
+    Recursively binds mouse wheel scrolling to a widget and all of its descendants,
+    directing scroll events to the target canvas.
+    """
+    widget.bind("<MouseWheel>", lambda event: canvas.yview_scroll(int(-1 * (event.delta / 120)), "units"))
+    for child in widget.winfo_children():
+        bind_mouse_wheel_recursive(child, canvas)
+
+
+# ==============================================================================
 # CLASS: SEVENSEGMENTDIGIT (POLYGON-BASED DRAWING)
 # ==============================================================================
 class SevenSegmentDigit:
@@ -294,7 +307,7 @@ class VFDDisplay(tk.Canvas):
 
 
 # ==============================================================================
-# CLASS: PINMAPPERWIDGET (PHYSICAL LAYOUT SIMULATOR)
+# CLASS: PINMAPPERWIDGET (PHYSICAL LAYOUT SIMULATOR WITH CENTERING)
 # ==============================================================================
 class PinMapperWidget(tk.Canvas):
     def __init__(self, parent, **kwargs):
@@ -308,43 +321,66 @@ class PinMapperWidget(tk.Canvas):
         self.on_hover_change_callback = None
         self.chip_coords = (90, 80, 190, 200)
         
+        # Center offsets
+        self.offset_x = 0
+        self.offset_y = 0
+        
         self.bind("<Motion>", self.on_mouse_move)
         self.bind("<Leave>", self.on_mouse_leave)
+        self.bind("<Configure>", self.on_canvas_configure)
+        
         self.draw_static_layout()
+
+    def on_canvas_configure(self, event):
+        # Calculate offsets to center the 280x280 widget contents
+        self.offset_x = max(0, (event.width - 280) // 2)
+        self.offset_y = max(0, (event.height - 280) // 2)
+        
+        self.draw_static_layout()
+        self.draw_logic_state(self.active_digit_char, self.active_digit_dp, self.common_anode)
 
     def draw_static_layout(self):
         self.delete("all")
+        
+        ox = self.offset_x
+        oy = self.offset_y
+        
+        # Title Card (always aligned top-left relative to canvas border)
         self.create_text(15, 18, text="INTERACTIVE PIN MAP (10-PIN DUAL)", fill=TEXT_LIGHT, font=("Consolas", 10, "bold"), anchor="w")
-        self.create_line(15, 28, 265, 28, fill=BORDER_COLOR, width=1)
+        self.create_line(15, 28, max(265, self.winfo_width() - 15), 28, fill=BORDER_COLOR, width=1)
         
-        # Draw Main Board / PCB breadboard
-        self.create_rectangle(15, 38, 265, 270, fill="#0D1321", outline=BORDER_COLOR, width=1)
+        # Draw Main Board / PCB breadboard (centered)
+        self.create_rectangle(15 + ox, 38 + oy, 265 + ox, 270 + oy, fill="#0D1321", outline=BORDER_COLOR, width=1)
         
-        # Draw chip body
+        # Draw chip body (centered)
         x1, y1, x2, y2 = self.chip_coords
-        self.create_rectangle(x1, y1, x2, y2, fill="#161F33", outline="#3B4F75", width=2, tags="chip_body")
-        self.create_arc(x1 + 35, y1 - 8, x1 + 65, y1 + 8, start=180, extent=180, fill="#0D1321", outline="#3B4F75", width=1)
+        self.create_rectangle(x1 + ox, y1 + oy, x2 + ox, y2 + oy, fill="#161F33", outline="#3B4F75", width=2, tags="chip_body")
+        self.create_arc(x1 + 35 + ox, y1 - 8 + oy, x1 + 65 + ox, y1 + 8 + oy, start=180, extent=180, fill="#0D1321", outline="#3B4F75", width=1)
         
-        # Pins & labels
+        # Pins & labels (centered)
         for pin_num, config in PIN_CONFIGS.items():
             px, py = config["pos"]
             lx, ly = config["label_pos"]
             name = config["name"]
             
             is_top = (py < 140)
-            p_x1, p_x2 = px - 6, px + 6
-            p_y1 = py - 8 if is_top else py
-            p_y2 = py if is_top else py + 8
+            p_x1, p_x2 = px - 6 + ox, px + 6 + ox
+            p_y1 = py - 8 + oy if is_top else py + oy
+            p_y2 = py + oy if is_top else py + 8 + oy
             
             self.create_rectangle(p_x1, p_y1, p_x2, p_y2, fill="#7C8BA1", outline="#4B596E", width=1, tags=f"pin_metal_{pin_num}")
-            self.create_text(lx, ly, text=f"{pin_num}:{name}", fill=TEXT_MUTED, font=("Consolas", 7, "bold"), tags=f"pin_lbl_{pin_num}")
+            self.create_text(lx + ox, ly + oy, text=f"{pin_num}:{name}", fill=TEXT_MUTED, font=("Consolas", 7, "bold"), tags=f"pin_lbl_{pin_num}")
 
-        self.tooltip_id = self.create_text(140, 252, text="Hover over pins/segments to inspect logic", fill=TEXT_MUTED, font=("Consolas", 8, "italic"))
+        # Tooltip text placed dynamically at bottom center of layout
+        self.tooltip_id = self.create_text(140 + ox, 252 + oy, text="Hover over pins/segments to inspect logic", fill=TEXT_MUTED, font=("Consolas", 8, "italic"))
 
     def draw_logic_state(self, active_char=' ', dp_on=False, common_anode=False, active_seg=None):
         self.active_digit_char = active_char
         self.active_digit_dp = dp_on
         self.common_anode = common_anode
+        
+        ox = self.offset_x
+        oy = self.offset_y
         
         states = SEGMENT_MAP.get(active_char, SEGMENT_MAP[' '])
         seg_states = {
@@ -354,8 +390,8 @@ class PinMapperWidget(tk.Canvas):
 
         self.delete("dynamic")
 
-        # Draw single digit inside chip
-        self.digit_renderer = SevenSegmentDigit(self, 129, 120, width=22, height=40, thickness=3.5, slant=0.06)
+        # Draw single digit inside chip (centered)
+        self.digit_renderer = SevenSegmentDigit(self, 129 + ox, 120 + oy, width=22, height=40, thickness=3.5, slant=0.06)
         self.digit_renderer.draw(active_char, dp_on, common_anode, active_seg=self.hovered_seg)
         
         # Draw wires connecting pins to segments
@@ -382,19 +418,19 @@ class PinMapperWidget(tk.Canvas):
                     wire_color = "#1F2E45"
                     wire_width = 1
             
-            pin_end_x = px
-            pin_end_y = py
+            pin_end_x = px + ox
+            pin_end_y = py + oy
             
-            # Destination coordinates inside chip VFD
-            if seg == 'a':       dest = (140, 120)
-            elif seg == 'b':     dest = (149, 130)
-            elif seg == 'c':     dest = (147, 150)
-            elif seg == 'd':     dest = (138, 160)
-            elif seg == 'e':     dest = (130, 150)
-            elif seg == 'f':     dest = (132, 130)
-            elif seg == 'g':     dest = (140, 140)
-            elif seg == 'dp':    dest = (156, 158)
-            else:                dest = (140, 140)
+            # Destination coordinates inside centered digit VFD
+            if seg == 'a':       dest = (140 + ox, 120 + oy)
+            elif seg == 'b':     dest = (149 + ox, 130 + oy)
+            elif seg == 'c':     dest = (147 + ox, 150 + oy)
+            elif seg == 'd':     dest = (138 + ox, 160 + oy)
+            elif seg == 'e':     dest = (130 + ox, 150 + oy)
+            elif seg == 'f':     dest = (132 + ox, 130 + oy)
+            elif seg == 'g':     dest = (140 + ox, 140 + oy)
+            elif seg == 'dp':    dest = (156 + ox, 158 + oy)
+            else:                dest = (140 + ox, 140 + oy)
             
             mid_y = (pin_end_y + dest[1]) / 2
             self.create_line(pin_end_x, pin_end_y, pin_end_x, mid_y, dest[0], mid_y, dest[0], dest[1],
@@ -405,13 +441,13 @@ class PinMapperWidget(tk.Canvas):
             self.create_oval(pin_end_x - r_dot, pin_end_y - r_dot, pin_end_x + r_dot, pin_end_y + r_dot,
                              fill=dot_color, outline="", tags="dynamic")
 
-        # Highlight pin metals on hover
+        # Highlight pin metals on hover (centered)
         if self.hovered_pin:
             px, py = PIN_CONFIGS[self.hovered_pin]["pos"]
             is_top = (py < 140)
-            p_x1, p_x2 = px - 6, px + 6
-            p_y1 = py - 8 if is_top else py
-            p_y2 = py if is_top else py + 8
+            p_x1, p_x2 = px - 6 + ox, px + 6 + ox
+            p_y1 = py - 8 + oy if is_top else py + oy
+            p_y2 = py + oy if is_top else py + 8 + oy
             self.create_rectangle(p_x1, p_y1, p_x2, p_y2, fill="#FF6B35", outline="#FFA07A", width=1.5, tags="dynamic")
             
         # Update Tooltip text
@@ -442,7 +478,10 @@ class PinMapperWidget(tk.Canvas):
             self.itemconfig(self.tooltip_id, text="Hover over pins/segments to inspect logic", fill=TEXT_MUTED)
 
     def on_mouse_move(self, event):
-        x, y = event.x, event.y
+        # Translate event coordinate relative to centering offsets
+        x = event.x - self.offset_x
+        y = event.y - self.offset_y
+        
         old_hover_pin = self.hovered_pin
         old_hover_seg = self.hovered_seg
         
@@ -600,6 +639,9 @@ class StepFlowWidget(tk.Frame):
         scrollbar.pack(side="right", fill="y", padx=(0, 15), pady=(0, 15))
         self.text_area.config(yscrollcommand=scrollbar.set)
         
+        # Mousewheel scroll binding for text box
+        self.text_area.bind("<MouseWheel>", lambda event: self.text_area.yview_scroll(int(-1 * (event.delta / 120)), "units"))
+        
         # Tags for styling
         self.text_area.tag_configure("header", foreground="#00F5FF", font=("Consolas", 10, "bold"))
         self.text_area.tag_configure("highlight", foreground="#FF6B35", font=("Consolas", 9, "bold"))
@@ -741,8 +783,6 @@ class StepFlowWidget(tk.Frame):
                     self.text_area.insert(tk.END, f"  Hasil Desimal:          {a / b}\n\n", "green")
                     
             step_num = 4
-            if op in ['+', '-']:
-                step_num = 4
             
             # Step 4: Output
             self.text_area.insert(tk.END, f"▶ STEP {step_num} · OUTPUT HASIL DESIMAL\n", "header")
@@ -771,21 +811,41 @@ class StepFlowWidget(tk.Frame):
 
 
 # ==============================================================================
-# CLASS: DECTOBINWIDGET (DECIMAL -> BINARY CONVERT GRID)
+# CLASS: DECTOBINWIDGET (DECIMAL -> BINARY CONVERT GRID WITH CENTERING)
 # ==============================================================================
 class DecToBinWidget(tk.Canvas):
     def __init__(self, parent, **kwargs):
         super().__init__(parent, bg=BG_CARD, bd=0, highlightthickness=1, highlightbackground=BORDER_COLOR, **kwargs)
+        
+        self.offset_x = 0
+        self.last_a = None
+        self.last_b = None
+        self.last_rStr = "0"
+        self.last_current_val = "0"
+        
+        self.bind("<Configure>", self.on_canvas_configure)
         self.draw_static_layout()
         
+    def on_canvas_configure(self, event):
+        # Calculate horizontal centering offset
+        self.offset_x = max(0, (event.width - 280) // 2)
+        self.draw_static_layout()
+        self.update_binary_tables(self.last_a, self.last_b, self.last_rStr, self.last_current_val)
+
     def draw_static_layout(self):
         self.delete("all")
         self.create_text(15, 18, text="DECIMAL → BINARY WEIGHT TABLES", fill=TEXT_LIGHT, font=("Consolas", 10, "bold"), anchor="w")
-        self.create_line(15, 28, 265, 28, fill=BORDER_COLOR, width=1)
-        self.tooltip_id = self.create_text(140, 562, text="Press operations to analyze values", fill=TEXT_MUTED, font=("Consolas", 8, "italic"))
+        self.create_line(15, 28, max(265, self.winfo_width() - 15), 28, fill=BORDER_COLOR, width=1)
+        self.tooltip_id = self.create_text(max(140, self.winfo_width() // 2), 562, text="Press operations to analyze values", fill=TEXT_MUTED, font=("Consolas", 8, "italic"))
 
     def update_binary_tables(self, a, b, rStr, current_val):
+        self.last_a = a
+        self.last_b = b
+        self.last_rStr = rStr
+        self.last_current_val = current_val
+        
         self.delete("dynamic")
+        ox = self.offset_x
         
         # List of values to render
         values_to_render = []
@@ -794,7 +854,6 @@ class DecToBinWidget(tk.Canvas):
         if b is not None:
             values_to_render.append(("Operand B", b))
         else:
-            # Check if we can preview B
             if a is not None and current_val != "0" and current_val != "":
                 try:
                     values_to_render.append(("Operand B (Live)", float(current_val)))
@@ -812,7 +871,7 @@ class DecToBinWidget(tk.Canvas):
             except ValueError:
                 pass
                 
-        # Draw up to 3 tables stacked
+        # Draw tables
         cy = 42
         for title, val in values_to_render[:3]:
             try:
@@ -825,15 +884,13 @@ class DecToBinWidget(tk.Canvas):
                 
             is_neg = (val < 0)
             neg_label = " (Negative)" if is_neg else ""
-            self.create_text(15, cy, text=f"▶ {title} = {val}{neg_label}", fill=COLOR_OP if title == "Result" else TEXT_LIGHT, font=("Consolas", 8, "bold"), anchor="w", tags="dynamic")
+            self.create_text(15 + ox, cy, text=f"▶ {title} = {val}{neg_label}", fill=COLOR_OP if title == "Result" else TEXT_LIGHT, font=("Consolas", 8, "bold"), anchor="w", tags="dynamic")
             
-            cx = 20
+            cx = 20 + ox
             weights = ["128", "64", "32", "16", "8", "4", "2", "1"]
             for idx, w in enumerate(weights):
-                # Draw weight labels
                 self.create_text(cx + 14, cy + 15, text=w, fill=TEXT_MUTED, font=("Consolas", 7), tags="dynamic")
                 
-                # Draw grid cells
                 bit = bin_str[idx]
                 cell_bg = "#10B981" if bit == '1' else "#0D1321"
                 cell_fg = TEXT_LIGHT if bit == '1' else "#1E293B"
@@ -843,16 +900,15 @@ class DecToBinWidget(tk.Canvas):
                 self.create_text(cx + 14, cy + 34, text=bit, fill=cell_fg, font=("Consolas", 9, "bold"), tags="dynamic")
                 cx += 30
                 
-            # Draw decimal to hexadecimal conversion details
-            self.create_text(15, cy + 53, text=f"HEX: 0x{val_i:02X}  |  OCT: {val_i:o}  |  BIN: 0b{bin_str}", fill=TEXT_MUTED, font=("Consolas", 7), anchor="w", tags="dynamic")
+            self.create_text(15 + ox, cy + 53, text=f"HEX: 0x{val_i:02X}  |  OCT: {val_i:o}  |  BIN: 0b{bin_str}", fill=TEXT_MUTED, font=("Consolas", 7), anchor="w", tags="dynamic")
             cy += 74
             
         if not values_to_render:
-            self.create_text(140, 140, text="No numeric inputs to convert", fill=TEXT_MUTED, font=("Consolas", 9), tags="dynamic")
+            self.create_text(max(140, self.winfo_width() // 2), 140, text="No numeric inputs to convert", fill=TEXT_MUTED, font=("Consolas", 9), tags="dynamic")
 
 
 # ==============================================================================
-# CLASS: SEGENCODEWIDGET (SEVEN SEGMENT ENCODE CARDS)
+# CLASS: SEGENCODEWIDGET (SEVEN SEGMENT ENCODE CARDS WITH SCROLLWHEEL FIX)
 # ==============================================================================
 class SegEncodeWidget(tk.Frame):
     def __init__(self, parent, **kwargs):
@@ -877,6 +933,10 @@ class SegEncodeWidget(tk.Frame):
         
         self.card_frame.bind("<Configure>", self.on_frame_configure)
         self.canvas.bind("<Configure>", self.on_canvas_configure)
+        
+        # Canvas mouse wheel binding
+        self.canvas.bind("<MouseWheel>", lambda event: self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units"))
+        self.card_frame.bind("<MouseWheel>", lambda event: self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units"))
         
     def on_frame_configure(self, event):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
@@ -958,22 +1018,36 @@ class SegEncodeWidget(tk.Frame):
                     
                 tk.Label(f, text=str(bit_val), bg="#090E17", fg=bit_col, font=("Consolas", 9, "bold")).pack(side="top")
 
+        # Recursive scroll-wheel routing
+        bind_mouse_wheel_recursive(self.card_frame, self.canvas)
+
 
 # ==============================================================================
-# CLASS: MINIACTIVEDIAGRAMWIDGET (SIDE-BY-SIDE MINI CANVAS REPS)
+# CLASS: MINIACTIVEDIAGRAMWIDGET (SIDE-BY-SIDE MINI CANVAS REPS WITH CENTERING)
 # ==============================================================================
 class MiniActiveDiagramWidget(tk.Canvas):
     def __init__(self, parent, **kwargs):
         super().__init__(parent, bg=BG_CARD, bd=0, highlightthickness=1, highlightbackground=BORDER_COLOR, **kwargs)
-        self.digits = []
+        
+        self.last_rStr = "0"
+        self.common_anode = False
+        
+        self.bind("<Configure>", self.on_canvas_configure)
         self.draw_static_layout()
         
+    def on_canvas_configure(self, event):
+        self.draw_static_layout()
+        self.update_diagrams(self.last_rStr, self.common_anode)
+
     def draw_static_layout(self):
         self.delete("all")
         self.create_text(15, 15, text="DIAGRAM SEGMEN AKTIF (SIDE-BY-SIDE REPRESENTATION)", fill=TEXT_LIGHT, font=("Consolas", 9, "bold"), anchor="w")
-        self.create_line(15, 25, 565, 25, fill=BORDER_COLOR, width=1)
+        self.create_line(15, 25, max(565, self.winfo_width() - 15), 25, fill=BORDER_COLOR, width=1)
         
     def update_diagrams(self, rStr, common_anode=False):
+        self.last_rStr = rStr
+        self.common_anode = common_anode
+        
         self.delete("dynamic")
         
         chars = []
@@ -990,12 +1064,13 @@ class MiniActiveDiagramWidget(tk.Canvas):
             i += 1
             
         n = len(chars)
+        canvas_width = max(580, self.winfo_width())
         if n == 0:
-            self.create_text(290, 55, text="No active digits to display", fill=TEXT_MUTED, font=("Consolas", 9), tags="dynamic")
+            self.create_text(canvas_width // 2, 55, text="No active digits to display", fill=TEXT_MUTED, font=("Consolas", 9), tags="dynamic")
             return
             
         total_w = n * 28
-        start_x = (580 - total_w) / 2
+        start_x = (canvas_width - total_w) / 2
         
         for idx, (char, dp_on) in enumerate(chars):
             dx = start_x + idx * 28
@@ -1008,7 +1083,7 @@ class MiniActiveDiagramWidget(tk.Canvas):
 
 
 # ==============================================================================
-# CLASS: TRUTHTABLEWIDGET (LIVE HIGHLIGHTING TRUTH TABLE)
+# CLASS: TRUTHTABLEWIDGET (LIVE HIGHLIGHTING TRUTH TABLE WITH CENTERING)
 # ==============================================================================
 class TruthTableWidget(tk.Canvas):
     def __init__(self, parent, **kwargs):
@@ -1021,14 +1096,26 @@ class TruthTableWidget(tk.Canvas):
         self.start_y = 45
         self.start_x = 20
         
+        self.bind("<Configure>", self.on_canvas_configure)
+        
+        self.draw_table_headers()
+        self.draw_table_rows()
+
+    def on_canvas_configure(self, event):
+        # Center truth table columns
+        total_col_width = sum(self.col_widths) + 20 * (len(self.col_widths) - 1)
+        self.start_x = max(20, (event.width - total_col_width) // 2)
+        
         self.draw_table_headers()
         self.draw_table_rows()
 
     def draw_table_headers(self):
         self.delete("headers")
         
+        # Dynamic line width
+        canvas_width = max(580, self.winfo_width())
         self.create_text(15, 18, text="TRUTH TABLE SEVEN SEGMENT (ABCDEFG)", fill=TEXT_LIGHT, font=("Consolas", 10, "bold"), anchor="w", tags="headers")
-        self.create_line(15, 28, 565, 28, fill=BORDER_COLOR, width=1, tags="headers")
+        self.create_line(15, 28, canvas_width - 15, 28, fill=BORDER_COLOR, width=1, tags="headers")
         
         headers = ["CHAR", "A", "B", "C", "D", "E", "F", "G", "DP", "HEX BYTE"]
         cx = self.start_x
@@ -1038,11 +1125,12 @@ class TruthTableWidget(tk.Canvas):
             self.create_text(col_cx, 38, text=header, fill=TEXT_MUTED, font=("Consolas", 8, "bold"), tags="headers")
             cx += w + 20
             
-        self.create_line(15, 45, 565, 45, fill=BORDER_COLOR, width=1, tags="headers")
+        self.create_line(15, 45, canvas_width - 15, 45, fill=BORDER_COLOR, width=1, tags="headers")
 
     def draw_table_rows(self):
         self.delete("rows")
         
+        canvas_width = max(580, self.winfo_width())
         cy = self.start_y + 10
         for idx, char in enumerate(CHAR_ORDER):
             states = SEGMENT_MAP[char]
@@ -1057,7 +1145,8 @@ class TruthTableWidget(tk.Canvas):
             bg_color = "#202E4C" if is_active_row else ("#0D1321" if idx % 2 == 0 else BG_CARD)
             border_col = "#FF6B35" if is_active_row else ""
             
-            row_id = self.create_rectangle(15, cy - 8, 565, cy + 8, fill=bg_color, outline=border_col, width=1 if is_active_row else 0, tags="rows")
+            # Row Background spans the centered section
+            row_id = self.create_rectangle(15, cy - 8, canvas_width - 15, cy + 8, fill=bg_color, outline=border_col, width=1 if is_active_row else 0, tags="rows")
             self.tag_bind(row_id, "<Button-1>", lambda event, c=char: self.on_row_click(c))
             
             cx = self.start_x
@@ -1260,7 +1349,7 @@ class CalculatorEngine:
 
 
 # ==============================================================================
-# MAIN APPLICATION WINDOW
+# MAIN APPLICATION WINDOW WITH RESIZABLE FULLSCREEN SUPPORT
 # ==============================================================================
 class CalculatorApplication(tk.Tk):
     def __init__(self):
@@ -1269,7 +1358,14 @@ class CalculatorApplication(tk.Tk):
         self.title("Neon 7-Segment Laboratory Console")
         self.geometry("1100x700")
         self.configure(bg=BG_MAIN)
-        self.resizable(False, False)
+        
+        # ENABLE RESIZING & FULLSCREEN
+        self.resizable(True, True)
+        self.minsize(1050, 650)
+        
+        # Keyboard binds for full screen toggle
+        self.bind("<F11>", self.toggle_fullscreen)
+        self.bind("<Escape>", self.exit_fullscreen)
 
         self.common_anode = False
         self.calc_engine = CalculatorEngine()
@@ -1281,6 +1377,14 @@ class CalculatorApplication(tk.Tk):
         self.setup_header()
         self.setup_layout()
         self.update_system_state()
+
+    def toggle_fullscreen(self, event=None):
+        self.attributes("-fullscreen", not self.attributes("-fullscreen"))
+        return "break"
+        
+    def exit_fullscreen(self, event=None):
+        self.attributes("-fullscreen", False)
+        return "break"
 
     def setup_header(self):
         header_frame = tk.Frame(self, bg=BG_MAIN, height=60)
@@ -1299,7 +1403,7 @@ class CalculatorApplication(tk.Tk):
         
         lbl_title = tk.Label(text_frame, text="7-SEGMENT DIGITAL CODER & CALCULATOR", bg=BG_MAIN, fg=TEXT_LIGHT, font=("Consolas", 14, "bold"), anchor="w")
         lbl_title.pack(anchor="w")
-        lbl_sub = tk.Label(text_frame, text="DIGITAL CIRCUIT LABS · HARDWARE INTERACTIVE SCHEMATIC", bg=BG_MAIN, fg=TEXT_MUTED, font=("Consolas", 8), anchor="w")
+        lbl_sub = tk.Label(text_frame, text="DIGITAL CIRCUIT LABS · HARDWARE INTERACTIVE SCHEMATIC · (Press F11 for Full Screen)", bg=BG_MAIN, fg=TEXT_MUTED, font=("Consolas", 8), anchor="w")
         lbl_sub.pack(anchor="w")
 
         control_frame = tk.Frame(header_frame, bg=BG_MAIN)
@@ -1326,9 +1430,9 @@ class CalculatorApplication(tk.Tk):
         main_container = tk.Frame(self, bg=BG_MAIN)
         main_container.pack(side="top", fill="both", expand=True, padx=25, pady=(0, 25))
         
-        # Left Panel (Calculator Frame)
+        # Left Panel (Calculator Frame) - Fixed Width, Fills Vertically
         left_panel = tk.Frame(main_container, bg=BG_MAIN, width=420)
-        left_panel.pack(side="left", fill="both", padx=(0, 20))
+        left_panel.pack(side="left", fill="y", padx=(0, 20), expand=False)
         left_panel.pack_propagate(False)
         
         # VFD Display Chassis
@@ -1378,7 +1482,7 @@ class CalculatorApplication(tk.Tk):
                 
                 btn_idx += 1
                 
-        # Right Panel (Tabbed Notebook / Dashboard)
+        # Right Panel (Tabbed Notebook / Dashboard) - Fills All Remaining Space
         right_panel = tk.Frame(main_container, bg=BG_MAIN)
         right_panel.pack(side="left", fill="both", expand=True)
         
