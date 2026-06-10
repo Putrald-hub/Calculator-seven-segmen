@@ -53,19 +53,7 @@ CHAR_ORDER = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'b', 'C', '
 SEG_NAMES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'dp']
 SEG_DESC = ['Top', 'Top-Right', 'Bottom-Right', 'Bottom', 'Bottom-Left', 'Top-Left', 'Middle', 'Decimal Point']
 
-# Physical IC 10-pin definitions for Standard 7-Segment
-PIN_CONFIGS = {
-    1:  {"name": "E",   "segment": "e",  "pos": (45, 205),  "label_pos": (45, 235)},
-    2:  {"name": "D",   "segment": "d",  "pos": (85, 205),  "label_pos": (85, 235)},
-    3:  {"name": "COM", "segment": None, "pos": (125, 205), "label_pos": (125, 235)},
-    4:  {"name": "C",   "segment": "c",  "pos": (165, 205), "label_pos": (165, 235)},
-    5:  {"name": "DP",  "segment": "dp", "pos": (205, 205), "label_pos": (205, 235)},
-    6:  {"name": "B",   "segment": "b",  "pos": (205, 75),  "label_pos": (205, 45)},
-    7:  {"name": "A",   "segment": "a",  "pos": (165, 75),  "label_pos": (165, 45)},
-    8:  {"name": "COM", "segment": None, "pos": (125, 75),  "label_pos": (125, 45)},
-    9:  {"name": "F",   "segment": "f",  "pos": (85, 75),   "label_pos": (85, 45)},
-    10: {"name": "G",   "segment": "g",  "pos": (45, 75),   "label_pos": (45, 45)}
-}
+
 
 
 # ==============================================================================
@@ -306,228 +294,7 @@ class VFDDisplay(tk.Canvas):
         return parsed
 
 
-# ==============================================================================
-# CLASS: PINMAPPERWIDGET (PHYSICAL LAYOUT SIMULATOR WITH CENTERING)
-# ==============================================================================
-class PinMapperWidget(tk.Canvas):
-    def __init__(self, parent, **kwargs):
-        super().__init__(parent, bg=BG_CARD, bd=0, highlightthickness=1, highlightbackground=BORDER_COLOR, **kwargs)
-        
-        self.common_anode = False
-        self.active_digit_char = ' '
-        self.active_digit_dp = False
-        self.hovered_pin = None
-        self.hovered_seg = None
-        self.on_hover_change_callback = None
-        self.chip_coords = (90, 80, 190, 200)
-        
-        # Center offsets
-        self.offset_x = 0
-        self.offset_y = 0
-        
-        self.bind("<Motion>", self.on_mouse_move)
-        self.bind("<Leave>", self.on_mouse_leave)
-        self.bind("<Configure>", self.on_canvas_configure)
-        
-        self.draw_static_layout()
 
-    def on_canvas_configure(self, event):
-        # Calculate offsets to center the 280x280 widget contents
-        self.offset_x = max(0, (event.width - 280) // 2)
-        self.offset_y = max(0, (event.height - 280) // 2)
-        
-        self.draw_static_layout()
-        self.draw_logic_state(self.active_digit_char, self.active_digit_dp, self.common_anode)
-
-    def draw_static_layout(self):
-        self.delete("all")
-        
-        ox = self.offset_x
-        oy = self.offset_y
-        
-        # Title Card (always aligned top-left relative to canvas border)
-        self.create_text(15, 18, text="INTERACTIVE PIN MAP (10-PIN DUAL)", fill=TEXT_LIGHT, font=("Consolas", 10, "bold"), anchor="w")
-        self.create_line(15, 28, max(265, self.winfo_width() - 15), 28, fill=BORDER_COLOR, width=1)
-        
-        # Draw Main Board / PCB breadboard (centered)
-        self.create_rectangle(15 + ox, 38 + oy, 265 + ox, 270 + oy, fill="#0D1321", outline=BORDER_COLOR, width=1)
-        
-        # Draw chip body (centered)
-        x1, y1, x2, y2 = self.chip_coords
-        self.create_rectangle(x1 + ox, y1 + oy, x2 + ox, y2 + oy, fill="#161F33", outline="#3B4F75", width=2, tags="chip_body")
-        self.create_arc(x1 + 35 + ox, y1 - 8 + oy, x1 + 65 + ox, y1 + 8 + oy, start=180, extent=180, fill="#0D1321", outline="#3B4F75", width=1)
-        
-        # Pins & labels (centered)
-        for pin_num, config in PIN_CONFIGS.items():
-            px, py = config["pos"]
-            lx, ly = config["label_pos"]
-            name = config["name"]
-            
-            is_top = (py < 140)
-            p_x1, p_x2 = px - 6 + ox, px + 6 + ox
-            p_y1 = py - 8 + oy if is_top else py + oy
-            p_y2 = py + oy if is_top else py + 8 + oy
-            
-            self.create_rectangle(p_x1, p_y1, p_x2, p_y2, fill="#7C8BA1", outline="#4B596E", width=1, tags=f"pin_metal_{pin_num}")
-            self.create_text(lx + ox, ly + oy, text=f"{pin_num}:{name}", fill=TEXT_MUTED, font=("Consolas", 7, "bold"), tags=f"pin_lbl_{pin_num}")
-
-        # Tooltip text placed dynamically at bottom center of layout
-        self.tooltip_id = self.create_text(140 + ox, 252 + oy, text="Hover over pins/segments to inspect logic", fill=TEXT_MUTED, font=("Consolas", 8, "italic"))
-
-    def draw_logic_state(self, active_char=' ', dp_on=False, common_anode=False, active_seg=None):
-        self.active_digit_char = active_char
-        self.active_digit_dp = dp_on
-        self.common_anode = common_anode
-        
-        ox = self.offset_x
-        oy = self.offset_y
-        
-        states = SEGMENT_MAP.get(active_char, SEGMENT_MAP[' '])
-        seg_states = {
-            'a': states[0], 'b': states[1], 'c': states[2], 'd': states[3],
-            'e': states[4], 'f': states[5], 'g': states[6], 'dp': 1 if dp_on else 0
-        }
-
-        self.delete("dynamic")
-
-        # Draw single digit inside chip (centered)
-        self.digit_renderer = SevenSegmentDigit(self, 129 + ox, 120 + oy, width=22, height=40, thickness=3.5, slant=0.06)
-        self.digit_renderer.draw(active_char, dp_on, common_anode, active_seg=self.hovered_seg)
-        
-        # Draw wires connecting pins to segments
-        for pin_num, config in PIN_CONFIGS.items():
-            seg = config["segment"]
-            px, py = config["pos"]
-            is_top = (py < 140)
-            
-            if seg is None:
-                is_active = True
-                wire_color = "#FFD700" if common_anode else "#708090"
-                wire_width = 1.5
-            else:
-                state = seg_states[seg]
-                is_active = (state == 1)
-                
-                if self.hovered_pin == pin_num or self.hovered_seg == seg:
-                    wire_color = "#FF6B35"
-                    wire_width = 2.5
-                elif is_active:
-                    wire_color = VFD_ON
-                    wire_width = 1.5
-                else:
-                    wire_color = "#1F2E45"
-                    wire_width = 1
-            
-            pin_end_x = px + ox
-            pin_end_y = py + oy
-            
-            # Destination coordinates inside centered digit VFD
-            if seg == 'a':       dest = (140 + ox, 120 + oy)
-            elif seg == 'b':     dest = (149 + ox, 130 + oy)
-            elif seg == 'c':     dest = (147 + ox, 150 + oy)
-            elif seg == 'd':     dest = (138 + ox, 160 + oy)
-            elif seg == 'e':     dest = (130 + ox, 150 + oy)
-            elif seg == 'f':     dest = (132 + ox, 130 + oy)
-            elif seg == 'g':     dest = (140 + ox, 140 + oy)
-            elif seg == 'dp':    dest = (156 + ox, 158 + oy)
-            else:                dest = (140 + ox, 140 + oy)
-            
-            mid_y = (pin_end_y + dest[1]) / 2
-            self.create_line(pin_end_x, pin_end_y, pin_end_x, mid_y, dest[0], mid_y, dest[0], dest[1],
-                             fill=wire_color, width=wire_width, tags=("dynamic", "wire"))
-            
-            dot_color = "#FFA07A" if (self.hovered_pin == pin_num) else (VFD_ON if is_active else "#2C3E55")
-            r_dot = 2.5 if (self.hovered_pin == pin_num) else 1.5
-            self.create_oval(pin_end_x - r_dot, pin_end_y - r_dot, pin_end_x + r_dot, pin_end_y + r_dot,
-                             fill=dot_color, outline="", tags="dynamic")
-
-        # Highlight pin metals on hover (centered)
-        if self.hovered_pin:
-            px, py = PIN_CONFIGS[self.hovered_pin]["pos"]
-            is_top = (py < 140)
-            p_x1, p_x2 = px - 6 + ox, px + 6 + ox
-            p_y1 = py - 8 + oy if is_top else py + oy
-            p_y2 = py + oy if is_top else py + 8 + oy
-            self.create_rectangle(p_x1, p_y1, p_x2, p_y2, fill="#FF6B35", outline="#FFA07A", width=1.5, tags="dynamic")
-            
-        # Update Tooltip text
-        if self.hovered_pin:
-            config = PIN_CONFIGS[self.hovered_pin]
-            seg = config["segment"]
-            name = config["name"]
-            
-            if seg is None:
-                state_str = "VCC (+5V)" if common_anode else "GND (0V)"
-                desc = f"Pin {self.hovered_pin} (COM): Tied to {state_str}"
-            else:
-                state = seg_states[seg]
-                if common_anode:
-                    logic = "LOW (0V) -> SEGMENT ON" if state == 1 else "HIGH (+5V) -> SEGMENT OFF"
-                else:
-                    logic = "HIGH (+5V) -> SEGMENT ON" if state == 1 else "LOW (0V) -> SEGMENT OFF"
-                desc = f"Pin {self.hovered_pin} (Seg {name.upper()}): {logic}"
-            self.itemconfig(self.tooltip_id, text=desc, fill="#FF6B35")
-        elif self.hovered_seg:
-            seg = self.hovered_seg
-            state = seg_states[seg]
-            target_pin = next((p for p, cfg in PIN_CONFIGS.items() if cfg["segment"] == seg), None)
-            logic = ("LOW (0V) -> ON" if state == 1 else "HIGH (+5V) -> OFF") if common_anode else ("HIGH (+5V) -> ON" if state == 1 else "LOW (0V) -> OFF")
-            desc = f"Segment {seg.upper()} (Pin {target_pin}): Logic {logic}"
-            self.itemconfig(self.tooltip_id, text=desc, fill=VFD_ON)
-        else:
-            self.itemconfig(self.tooltip_id, text="Hover over pins/segments to inspect logic", fill=TEXT_MUTED)
-
-    def on_mouse_move(self, event):
-        # Translate event coordinate relative to centering offsets
-        x = event.x - self.offset_x
-        y = event.y - self.offset_y
-        
-        old_hover_pin = self.hovered_pin
-        old_hover_seg = self.hovered_seg
-        
-        self.hovered_pin = None
-        self.hovered_seg = None
-        
-        # Check hover on pins
-        for pin_num, config in PIN_CONFIGS.items():
-            px, py = config["pos"]
-            is_top = (py < 140)
-            p_x1, p_x2 = px - 8, px + 8
-            p_y1 = py - 12 if is_top else py - 2
-            p_y2 = py + 2 if is_top else py + 12
-            
-            if p_x1 <= x <= p_x2 and p_y1 <= y <= p_y2:
-                self.hovered_pin = pin_num
-                self.hovered_seg = config["segment"]
-                break
-                
-        # Check hover on central digits
-        if not self.hovered_pin and hasattr(self, 'digit_renderer'):
-            if 120 <= x <= 162 and 115 <= y <= 165:
-                if y < 125 and 125 <= x <= 155: self.hovered_seg = 'a'
-                elif y > 153 and 125 <= x <= 155: self.hovered_seg = 'd'
-                elif 136 <= y <= 144 and 128 <= x <= 152: self.hovered_seg = 'g'
-                elif x < 136:
-                    self.hovered_seg = 'f' if y < 140 else 'e'
-                elif 136 <= x <= 152:
-                    if y < 140:
-                        self.hovered_seg = 'f' if x < 142 else 'b'
-                    else:
-                        self.hovered_seg = 'e' if x < 142 else 'c'
-                else:
-                    self.hovered_seg = 'b' if y < 140 else ('dp' if y > 150 and x > 150 else 'c')
-
-        if self.hovered_pin != old_hover_pin or self.hovered_seg != old_hover_seg:
-            self.draw_logic_state(self.active_digit_char, self.active_digit_dp, self.common_anode)
-            if self.on_hover_change_callback:
-                self.on_hover_change_callback(self.hovered_seg)
-
-    def on_mouse_leave(self, event):
-        self.hovered_pin = None
-        self.hovered_seg = None
-        self.draw_logic_state(self.active_digit_char, self.active_digit_dp, self.common_anode)
-        if self.on_hover_change_callback:
-            self.on_hover_change_callback(None)
 
 
 # ==============================================================================
@@ -536,49 +303,66 @@ class PinMapperWidget(tk.Canvas):
 class DecoderDetailsWidget(tk.Frame):
     def __init__(self, parent, **kwargs):
         super().__init__(parent, bg=BG_CARD, bd=0, highlightthickness=1, highlightbackground=BORDER_COLOR, **kwargs)
-        
+        self.grid_propagate(False)
         self.columnconfigure(0, weight=1)
         self.columnconfigure(1, weight=1)
         
-        lbl_title = tk.Label(self, text="ACTIVE DIGIT DECODER LOGIC", bg=BG_CARD, fg=TEXT_LIGHT, font=("Consolas", 10, "bold"), anchor="w")
+        # Configure row weights to stretch and fill the 300px height nicely
+        self.rowconfigure(0, weight=0)  # title
+        self.rowconfigure(1, weight=0)  # line separator
+        self.rowconfigure(2, weight=1)  # row 2-5 are rowspan 4, we weight them
+        self.rowconfigure(3, weight=1)
+        self.rowconfigure(4, weight=1)
+        self.rowconfigure(5, weight=1)
+        self.rowconfigure(6, weight=0)
+        self.rowconfigure(7, weight=1)
+        self.rowconfigure(8, weight=0)
+        self.rowconfigure(9, weight=1)
+        
+        lbl_title = tk.Label(self, text="VISUALISASI OUTPUT ANGKA", bg=BG_CARD, fg=TEXT_LIGHT, font=("Consolas", 10, "bold"), anchor="w")
         lbl_title.grid(row=0, column=0, columnspan=2, padx=15, pady=(15, 5), sticky="w")
         
         line = tk.Frame(self, height=1, bg=BORDER_COLOR)
         line.grid(row=1, column=0, columnspan=2, padx=15, pady=(0, 10), sticky="ew")
         
-        # Large active character preview
-        self.lbl_char_val = tk.Label(self, text="8", bg="#0D1321", fg=VFD_ON, font=("Consolas", 36, "bold"), width=3, bd=1, relief="solid", highlightbackground=BORDER_COLOR)
+        # Large active character preview (font size increased to 72)
+        self.lbl_char_val = tk.Label(self, text="8", bg="#0D1321", fg=VFD_ON, font=("Consolas", 72, "bold"), bd=1, relief="solid", highlightbackground=BORDER_COLOR)
         self.lbl_char_val.grid(row=2, column=0, rowspan=4, padx=(15, 10), pady=5, sticky="nsew")
         
         # Segment states indicators (A-G, DP)
         self.seg_frame = tk.Frame(self, bg=BG_CARD)
         self.seg_frame.grid(row=2, column=1, rowspan=4, padx=(0, 15), pady=5, sticky="nsew")
         
+        # Configure grid column & row weights on seg_frame so they stretch and fill the space
+        for c in range(4):
+            self.seg_frame.columnconfigure(c, weight=1)
+        for r in range(2):
+            self.seg_frame.rowconfigure(r, weight=1)
+            
         self.seg_labels = {}
         segs = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'dp']
         for idx, s in enumerate(segs):
             r = idx // 4
             c = idx % 4
-            f = tk.Frame(self.seg_frame, bg="#0D1321", highlightthickness=1, highlightbackground=BORDER_COLOR, width=32, height=32)
-            f.grid(row=r, column=c, padx=3, pady=3)
-            f.grid_propagate(False)
+            f = tk.Frame(self.seg_frame, bg="#0D1321", highlightthickness=1, highlightbackground=BORDER_COLOR)
+            f.grid(row=r, column=c, padx=3, pady=3, sticky="nsew")
             
-            lbl_name = tk.Label(f, text=s.upper(), bg="#0D1321", fg=TEXT_MUTED, font=("Consolas", 8, "bold"))
-            lbl_name.pack(side="top", pady=(1, 0))
-            lbl_val = tk.Label(f, text="1", bg="#0D1321", fg=VFD_ON, font=("Consolas", 9, "bold"))
-            lbl_val.pack(side="top", pady=(0, 1))
+            lbl_name = tk.Label(f, text=s.upper(), bg="#0D1321", fg=TEXT_MUTED, font=("Consolas", 10, "bold"))
+            lbl_name.pack(side="top", fill="both", expand=True)
+            lbl_val = tk.Label(f, text="1", bg="#0D1321", fg=VFD_ON, font=("Consolas", 12, "bold"))
+            lbl_val.pack(side="top", fill="both", expand=True)
             
             self.seg_labels[s] = (f, lbl_name, lbl_val)
             
         self.lbl_bin_lbl = tk.Label(self, text="BINARY [dp,g,f,e,d,c,b,a]:", bg=BG_CARD, fg=TEXT_MUTED, font=("Consolas", 8, "bold"), anchor="w")
         self.lbl_bin_lbl.grid(row=6, column=0, columnspan=2, padx=15, pady=(12, 2), sticky="w")
         self.lbl_bin_val = tk.Label(self, text="0b01111111", bg="#0D1321", fg="#F59E0B", font=("Consolas", 12, "bold"), anchor="w", padx=10, pady=5)
-        self.lbl_bin_val.grid(row=7, column=0, columnspan=2, padx=15, pady=(0, 8), sticky="ew")
+        self.lbl_bin_val.grid(row=7, column=0, columnspan=2, padx=15, pady=(0, 8), sticky="nsew")
         
         self.lbl_hex_lbl = tk.Label(self, text="HEXADECIMAL BYTEVALUE:", bg=BG_CARD, fg=TEXT_MUTED, font=("Consolas", 8, "bold"), anchor="w")
         self.lbl_hex_lbl.grid(row=8, column=0, columnspan=2, padx=15, pady=(2, 2), sticky="w")
         self.lbl_hex_val = tk.Label(self, text="0x7F", bg="#0D1321", fg=COLOR_EQ, font=("Consolas", 12, "bold"), anchor="w", padx=10, pady=5)
-        self.lbl_hex_val.grid(row=9, column=0, columnspan=2, padx=15, pady=(0, 15), sticky="ew")
+        self.lbl_hex_val.grid(row=9, column=0, columnspan=2, padx=15, pady=(0, 15), sticky="nsew")
 
     def update_decoder(self, char=' ', dp_on=False, common_anode=False, hovered_seg=None):
         self.lbl_char_val.config(text="-" if char == ' ' else char)
@@ -813,30 +597,33 @@ class StepFlowWidget(tk.Frame):
 # ==============================================================================
 # CLASS: DECTOBINWIDGET (DECIMAL -> BINARY CONVERT GRID WITH CENTERING)
 # ==============================================================================
-class DecToBinWidget(tk.Canvas):
+class DecToBinWidget(tk.Frame):
     def __init__(self, parent, **kwargs):
+        # Pop height if it exists so we can size to fit contents automatically
+        kwargs.pop('height', None)
         super().__init__(parent, bg=BG_CARD, bd=0, highlightthickness=1, highlightbackground=BORDER_COLOR, **kwargs)
         
-        self.offset_x = 0
         self.last_a = None
         self.last_b = None
         self.last_rStr = "0"
         self.last_current_val = "0"
         
-        self.bind("<Configure>", self.on_canvas_configure)
-        self.draw_static_layout()
+        # Title Card
+        self.lbl_title = tk.Label(self, text="DECIMAL → BINARY WEIGHT TABLES", bg=BG_CARD, fg=TEXT_LIGHT, font=("Consolas", 10, "bold"), anchor="w")
+        self.lbl_title.pack(side="top", fill="x", padx=15, pady=(15, 5))
         
-    def on_canvas_configure(self, event):
-        # Calculate horizontal centering offset
-        self.offset_x = max(0, (event.width - 280) // 2)
-        self.draw_static_layout()
+        self.line = tk.Frame(self, height=1, bg=BORDER_COLOR)
+        self.line.pack(side="top", fill="x", padx=15, pady=(0, 10))
+        
+        # Container frame for active tables
+        self.tables_container = tk.Frame(self, bg=BG_CARD)
+        self.tables_container.pack(fill="both", expand=True, padx=15, pady=(0, 10))
+        
+        # Tooltip label at the bottom
+        self.lbl_tooltip = tk.Label(self, text="Press operations to analyze values", bg=BG_CARD, fg=TEXT_MUTED, font=("Consolas", 8, "italic"))
+        self.lbl_tooltip.pack(side="bottom", fill="x", pady=(5, 15))
+        
         self.update_binary_tables(self.last_a, self.last_b, self.last_rStr, self.last_current_val)
-
-    def draw_static_layout(self):
-        self.delete("all")
-        self.create_text(15, 18, text="DECIMAL → BINARY WEIGHT TABLES", fill=TEXT_LIGHT, font=("Consolas", 10, "bold"), anchor="w")
-        self.create_line(15, 28, max(265, self.winfo_width() - 15), 28, fill=BORDER_COLOR, width=1)
-        self.tooltip_id = self.create_text(max(140, self.winfo_width() // 2), 562, text="Press operations to analyze values", fill=TEXT_MUTED, font=("Consolas", 8, "italic"))
 
     def update_binary_tables(self, a, b, rStr, current_val):
         self.last_a = a
@@ -844,9 +631,10 @@ class DecToBinWidget(tk.Canvas):
         self.last_rStr = rStr
         self.last_current_val = current_val
         
-        self.delete("dynamic")
-        ox = self.offset_x
-        
+        # Clear previous tables
+        for widget in self.tables_container.winfo_children():
+            widget.destroy()
+            
         # List of values to render
         values_to_render = []
         if a is not None:
@@ -871,8 +659,11 @@ class DecToBinWidget(tk.Canvas):
             except ValueError:
                 pass
                 
-        # Draw tables
-        cy = 42
+        if not values_to_render:
+            lbl_empty = tk.Label(self.tables_container, text="No numeric inputs to convert", bg=BG_CARD, fg=TEXT_MUTED, font=("Consolas", 9))
+            lbl_empty.pack(pady=20, fill="x")
+            return
+            
         for title, val in values_to_render[:3]:
             try:
                 val_i = int(round(abs(val)))
@@ -884,202 +675,49 @@ class DecToBinWidget(tk.Canvas):
                 
             is_neg = (val < 0)
             neg_label = " (Negative)" if is_neg else ""
-            self.create_text(15 + ox, cy, text=f"▶ {title} = {val}{neg_label}", fill=COLOR_OP if title == "Result" else TEXT_LIGHT, font=("Consolas", 8, "bold"), anchor="w", tags="dynamic")
             
-            cx = 20 + ox
+            # Table Frame
+            tbl_frame = tk.Frame(self.tables_container, bg=BG_CARD)
+            tbl_frame.pack(fill="x", pady=8)
+            
+            # 1. Header label
+            lbl_hdr = tk.Label(tbl_frame, text=f"▶ {title} = {val}{neg_label}", bg=BG_CARD, fg=COLOR_OP if title == "Result" else TEXT_LIGHT, font=("Consolas", 10, "bold"), anchor="w")
+            lbl_hdr.pack(fill="x", pady=(0, 5))
+            
+            # 2. Grid for the 4 columns x 2 rows (Flexbox-like alignment)
+            grid_frame = tk.Frame(tbl_frame, bg=BG_CARD)
+            grid_frame.pack(fill="x")
+            for c in range(4):
+                grid_frame.columnconfigure(c, weight=1, uniform="bits")
+                
             weights = ["128", "64", "32", "16", "8", "4", "2", "1"]
             for idx, w in enumerate(weights):
-                self.create_text(cx + 14, cy + 15, text=w, fill=TEXT_MUTED, font=("Consolas", 7), tags="dynamic")
+                col_idx = idx % 4
+                row_idx = 0 if idx < 4 else 1
+                
+                # Cell Frame
+                cell = tk.Frame(grid_frame, bg=BG_CARD)
+                cell.grid(row=row_idx, column=col_idx, padx=4, pady=3, sticky="ew")
+                
+                # Weight Label
+                lbl_w = tk.Label(cell, text=w, bg=BG_CARD, fg=TEXT_MUTED, font=("Consolas", 9, "bold"))
+                lbl_w.pack(side="top", fill="x")
                 
                 bit = bin_str[idx]
                 cell_bg = "#10B981" if bit == '1' else "#0D1321"
                 cell_fg = TEXT_LIGHT if bit == '1' else "#1E293B"
                 cell_border = "#34D399" if bit == '1' else BORDER_COLOR
                 
-                self.create_rectangle(cx, cy + 24, cx + 28, cy + 44, fill=cell_bg, outline=cell_border, width=1, tags="dynamic")
-                self.create_text(cx + 14, cy + 34, text=bit, fill=cell_fg, font=("Consolas", 9, "bold"), tags="dynamic")
-                cx += 30
+                # Bit value container (represented as a Label with border)
+                lbl_b = tk.Label(cell, text=bit, bg=cell_bg, fg=cell_fg, font=("Consolas", 12, "bold"), bd=1, relief="solid", highlightbackground=cell_border, height=1, pady=3)
+                lbl_b.pack(side="top", fill="x", pady=(2, 0))
                 
-            self.create_text(15 + ox, cy + 53, text=f"HEX: 0x{val_i:02X}  |  OCT: {val_i:o}  |  BIN: 0b{bin_str}", fill=TEXT_MUTED, font=("Consolas", 7), anchor="w", tags="dynamic")
-            cy += 74
-            
-        if not values_to_render:
-            self.create_text(max(140, self.winfo_width() // 2), 140, text="No numeric inputs to convert", fill=TEXT_MUTED, font=("Consolas", 9), tags="dynamic")
+            # 3. Footer summary label
+            lbl_ftr = tk.Label(tbl_frame, text=f"HEX: 0x{val_i:02X}  |  OCT: {val_i:o}  |  BIN: 0b{bin_str}", bg=BG_CARD, fg=TEXT_MUTED, font=("Consolas", 8, "bold"), anchor="w")
+            lbl_ftr.pack(fill="x", pady=(5, 0))
 
 
-# ==============================================================================
-# CLASS: SEGENCODEWIDGET (SEVEN SEGMENT ENCODE CARDS WITH SCROLLWHEEL FIX)
-# ==============================================================================
-class SegEncodeWidget(tk.Frame):
-    def __init__(self, parent, **kwargs):
-        super().__init__(parent, bg=BG_CARD, bd=0, highlightthickness=1, highlightbackground=BORDER_COLOR, **kwargs)
-        
-        lbl_title = tk.Label(self, text="SEVEN SEGMENT ENCODE CARDS", bg=BG_CARD, fg=TEXT_LIGHT, font=("Consolas", 10, "bold"), anchor="w")
-        lbl_title.pack(side="top", fill="x", padx=15, pady=(15, 5))
-        
-        line = tk.Frame(self, height=1, bg=BORDER_COLOR)
-        line.pack(side="top", fill="x", padx=15, pady=(0, 10))
-        
-        # Scrollable Canvas container for cards
-        self.canvas = tk.Canvas(self, bg=BG_CARD, bd=0, highlightthickness=0)
-        self.canvas.pack(side="left", fill="both", expand=True, padx=(15, 0), pady=(0, 15))
-        
-        self.scrollbar = tk.Scrollbar(self, command=self.canvas.yview, width=10, bg=BG_CARD, bd=0)
-        self.scrollbar.pack(side="right", fill="y", padx=(0, 15), pady=(0, 15))
-        self.canvas.config(yscrollcommand=self.scrollbar.set)
-        
-        self.card_frame = tk.Frame(self.canvas, bg=BG_CARD)
-        self.canvas_window = self.canvas.create_window((0, 0), window=self.card_frame, anchor="nw")
-        
-        self.card_frame.bind("<Configure>", self.on_frame_configure)
-        self.canvas.bind("<Configure>", self.on_canvas_configure)
-        
-        # Canvas mouse wheel binding
-        self.canvas.bind("<MouseWheel>", lambda event: self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units"))
-        self.card_frame.bind("<MouseWheel>", lambda event: self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units"))
-        
-    def on_frame_configure(self, event):
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        
-    def on_canvas_configure(self, event):
-        canvas_width = event.width
-        self.canvas.itemconfig(self.canvas_window, width=canvas_width)
 
-    def update_encoder_cards(self, rStr, common_anode=False):
-        # Clear previous cards
-        for widget in self.card_frame.winfo_children():
-            widget.destroy()
-            
-        chars = []
-        i = 0
-        while i < len(rStr):
-            char = rStr[i]
-            if char == '.' and len(chars) > 0:
-                chars[-1] = (chars[-1][0], True)
-            else:
-                if char == '.':
-                    chars.append((' ', True))
-                else:
-                    chars.append((char, False))
-            i += 1
-            
-        valid_chars = [(c, dp) for (c, dp) in chars if c in SEGMENT_MAP]
-        
-        if not valid_chars:
-            lbl_empty = tk.Label(self.card_frame, text="No digits to encode", bg=BG_CARD, fg=TEXT_MUTED, font=("Consolas", 9))
-            lbl_empty.pack(pady=40, fill="x")
-            return
-            
-        for char, dp_on in valid_chars:
-            card = tk.Frame(self.card_frame, bg="#0D1321", highlightthickness=1, highlightbackground=BORDER_COLOR, pady=8, padx=10)
-            card.pack(fill="x", pady=4, padx=5)
-            
-            # Left: big char and code info
-            info_frame = tk.Frame(card, bg="#0D1321")
-            info_frame.pack(side="left", fill="both")
-            
-            lbl_big = tk.Label(info_frame, text=char if char != ' ' else "[DP]", bg="#0D1321", fg=VFD_ON, font=("Consolas", 24, "bold"), width=3)
-            lbl_big.pack(side="left", padx=(0, 10))
-            
-            states = SEGMENT_MAP[char]
-            bits = []
-            for bit in states[:7]:
-                bits.append(0 if bit == 1 else 1 if common_anode else bit)
-            dp_bit = 0 if dp_on else 1 if common_anode else (1 if dp_on else 0)
-            bits.append(dp_bit)
-            
-            bin_str = "".join(str(b) for b in bits)
-            byte_val = 0
-            for b in bits:
-                byte_val = (byte_val << 1) | b
-                
-            code_frame = tk.Frame(info_frame, bg="#0D1321")
-            code_frame.pack(side="left", fill="y")
-            
-            tk.Label(code_frame, text=f"BIN: 0b{bin_str}", bg="#0D1321", fg="#10B981", font=("Consolas", 8, "bold"), anchor="w").pack(anchor="w")
-            tk.Label(code_frame, text=f"HEX: 0x{byte_val:02X}", bg="#0D1321", fg=COLOR_OP, font=("Consolas", 8, "bold"), anchor="w").pack(anchor="w")
-            
-            # Right: segment bit badges
-            badge_frame = tk.Frame(card, bg="#0D1321")
-            badge_frame.pack(side="right", fill="both", expand=True)
-            
-            names = ["A", "B", "C", "D", "E", "F", "G", "DP"]
-            for idx, name in enumerate(names):
-                f = tk.Frame(badge_frame, bg="#090E17", highlightthickness=1, highlightbackground=BORDER_COLOR, width=28, height=36)
-                f.pack(side="left", padx=2, expand=True)
-                f.pack_propagate(False)
-                
-                tk.Label(f, text=name, bg="#090E17", fg=TEXT_MUTED, font=("Consolas", 6, "bold")).pack(side="top", pady=(1, 0))
-                
-                bit_val = bits[idx]
-                bit_col = TEXT_MUTED
-                if bit_val == (0 if common_anode else 1):
-                    bit_col = VFD_ON
-                    
-                tk.Label(f, text=str(bit_val), bg="#090E17", fg=bit_col, font=("Consolas", 9, "bold")).pack(side="top")
-
-        # Recursive scroll-wheel routing
-        bind_mouse_wheel_recursive(self.card_frame, self.canvas)
-
-
-# ==============================================================================
-# CLASS: MINIACTIVEDIAGRAMWIDGET (SIDE-BY-SIDE MINI CANVAS REPS WITH CENTERING)
-# ==============================================================================
-class MiniActiveDiagramWidget(tk.Canvas):
-    def __init__(self, parent, **kwargs):
-        super().__init__(parent, bg=BG_CARD, bd=0, highlightthickness=1, highlightbackground=BORDER_COLOR, **kwargs)
-        
-        self.last_rStr = "0"
-        self.common_anode = False
-        
-        self.bind("<Configure>", self.on_canvas_configure)
-        self.draw_static_layout()
-        
-    def on_canvas_configure(self, event):
-        self.draw_static_layout()
-        self.update_diagrams(self.last_rStr, self.common_anode)
-
-    def draw_static_layout(self):
-        self.delete("all")
-        self.create_text(15, 15, text="DIAGRAM SEGMEN AKTIF (SIDE-BY-SIDE REPRESENTATION)", fill=TEXT_LIGHT, font=("Consolas", 9, "bold"), anchor="w")
-        self.create_line(15, 25, max(565, self.winfo_width() - 15), 25, fill=BORDER_COLOR, width=1)
-        
-    def update_diagrams(self, rStr, common_anode=False):
-        self.last_rStr = rStr
-        self.common_anode = common_anode
-        
-        self.delete("dynamic")
-        
-        chars = []
-        i = 0
-        while i < len(rStr):
-            char = rStr[i]
-            if char == '.' and len(chars) > 0:
-                chars[-1] = (chars[-1][0], True)
-            else:
-                if char == '.':
-                    chars.append((' ', True))
-                else:
-                    chars.append((char, False))
-            i += 1
-            
-        n = len(chars)
-        canvas_width = max(580, self.winfo_width())
-        if n == 0:
-            self.create_text(canvas_width // 2, 55, text="No active digits to display", fill=TEXT_MUTED, font=("Consolas", 9), tags="dynamic")
-            return
-            
-        total_w = n * 28
-        start_x = (canvas_width - total_w) / 2
-        
-        for idx, (char, dp_on) in enumerate(chars):
-            dx = start_x + idx * 28
-            digit = SevenSegmentDigit(self, dx, 32, width=16, height=30, thickness=2, slant=0.04)
-            digit.draw(char, dp_on, common_anode)
-            
-            for seg, poly_id in digit.segment_ids.items():
-                self.addtag_withtag("dynamic", poly_id)
-            self.create_text(dx + 8, 70, text=char if char != ' ' else "DP", fill=TEXT_MUTED, font=("Consolas", 7, "bold"), tags="dynamic")
 
 
 # ==============================================================================
@@ -1482,87 +1120,60 @@ class CalculatorApplication(tk.Tk):
                 
                 btn_idx += 1
                 
-        # Right Panel (Tabbed Notebook / Dashboard) - Fills All Remaining Space
+        # Right Panel (Unified Scrollable Dashboard) - Fills All Remaining Space
         right_panel = tk.Frame(main_container, bg=BG_MAIN)
         right_panel.pack(side="left", fill="both", expand=True)
         
-        # 1. Custom Tab Bar Frame
-        self.tab_bar = tk.Frame(right_panel, bg=BG_MAIN)
-        self.tab_bar.pack(side="top", fill="x", pady=(0, 10))
+        self.right_canvas = tk.Canvas(right_panel, bg=BG_MAIN, bd=0, highlightthickness=0)
+        self.right_canvas.pack(side="left", fill="both", expand=True)
         
-        # Tab definitions
-        self.tabs = [
-            ("Logic & Pin Map", self.show_tab_logic),
-            ("Step-by-Step Flow", self.show_tab_steps),
-            ("Binary & Encoder", self.show_tab_binary),
-            ("Truth Table & Diagrams", self.show_tab_truth)
-        ]
-        self.tab_buttons = []
-        self.tab_frames = []
+        self.right_scrollbar = tk.Scrollbar(right_panel, command=self.right_canvas.yview, width=10, bg=BG_MAIN, bd=0)
+        self.right_scrollbar.pack(side="right", fill="y")
+        self.right_canvas.config(yscrollcommand=self.right_scrollbar.set)
         
-        # Tab container frame where panels will go
-        self.tab_container = tk.Frame(right_panel, bg=BG_MAIN)
-        self.tab_container.pack(side="top", fill="both", expand=True)
+        self.right_container = tk.Frame(self.right_canvas, bg=BG_MAIN)
+        self.canvas_window = self.right_canvas.create_window((0, 0), window=self.right_container, anchor="nw")
         
-        # Tab 1: Logic & Pin Map Frame
-        self.frame_logic = tk.Frame(self.tab_container, bg=BG_MAIN)
-        self.pin_mapper = PinMapperWidget(self.frame_logic, width=280, height=280)
-        self.pin_mapper.pack(side="left", fill="both", expand=False)
-        self.pin_mapper.on_hover_change_callback = self.on_pin_or_segment_hovered
+        self.right_container.bind("<Configure>", self.on_right_container_configure)
+        self.right_canvas.bind("<Configure>", self.on_right_canvas_configure)
+        self.right_canvas.bind("<MouseWheel>", self.on_main_scroll)
         
-        self.decoder_details = DecoderDetailsWidget(self.frame_logic, height=280)
-        self.decoder_details.pack(side="left", fill="both", expand=True, padx=(15, 0))
-        self.tab_frames.append(self.frame_logic)
+        # 1. Decoder Details (Visualisasi Output Angka)
+        self.decoder_details = DecoderDetailsWidget(self.right_container, height=300)
+        self.decoder_details.pack(fill="x", pady=(0, 15))
         
-        # Tab 2: Step-by-Step Flow Frame
-        self.frame_steps = tk.Frame(self.tab_container, bg=BG_MAIN)
-        self.step_flow = StepFlowWidget(self.frame_steps, height=590)
-        self.step_flow.pack(fill="both", expand=True)
-        self.tab_frames.append(self.frame_steps)
+        # 2. Decimal to Binary Table
+        self.dec_to_bin = DecToBinWidget(self.right_container)
+        self.dec_to_bin.pack(fill="x", pady=(0, 15))
         
-        # Tab 3: Binary & Encoder Frame
-        self.frame_binary = tk.Frame(self.tab_container, bg=BG_MAIN)
-        self.dec_to_bin = DecToBinWidget(self.frame_binary, width=280, height=590)
-        self.dec_to_bin.pack(side="left", fill="both", expand=False)
+        # 3. Step-by-Step Flow
+        self.step_flow = StepFlowWidget(self.right_container, height=300)
+        self.step_flow.pack(fill="x", pady=(0, 15))
         
-        self.seg_encode = SegEncodeWidget(self.frame_binary, height=590)
-        self.seg_encode.pack(side="left", fill="both", expand=True, padx=(15, 0))
-        self.tab_frames.append(self.frame_binary)
-        
-        # Tab 4: Truth Table & Diagrams Frame
-        self.frame_truth = tk.Frame(self.tab_container, bg=BG_MAIN)
-        self.truth_table = TruthTableWidget(self.frame_truth, height=480)
-        self.truth_table.pack(side="top", fill="both", expand=True)
+        # 4. Truth Table
+        self.truth_table = TruthTableWidget(self.right_container, height=350)
+        self.truth_table.pack(fill="x", pady=(0, 15))
         self.truth_table.row_click_callback = self.on_truth_table_row_clicked
         
-        self.active_diagrams = MiniActiveDiagramWidget(self.frame_truth, height=100)
-        self.active_diagrams.pack(side="top", fill="x", pady=(10, 0))
-        self.tab_frames.append(self.frame_truth)
+        self.bind_scroll_recursive(self.right_container)
+
+    def on_right_container_configure(self, event):
+        self.right_canvas.configure(scrollregion=self.right_canvas.bbox("all"))
         
-        # Pack Tab Buttons
-        for idx, (title, cmd) in enumerate(self.tabs):
-            btn = tk.Label(self.tab_bar, text=title, bg="#111827", fg=TEXT_MUTED, font=("Consolas", 9, "bold"),
-                           padx=15, pady=8, bd=1, relief="solid", highlightbackground=BORDER_COLOR, cursor="hand2")
-            btn.pack(side="left", padx=(0, 5))
-            btn.bind("<Button-1>", lambda event, i=idx: self.select_tab(i))
-            self.tab_buttons.append(btn)
-            
-        self.select_tab(0)
+    def on_right_canvas_configure(self, event):
+        canvas_width = event.width
+        self.right_canvas.itemconfig(self.canvas_window, width=canvas_width)
+        
+    def on_main_scroll(self, event):
+        if hasattr(self, 'step_flow') and event.widget == self.step_flow.text_area:
+            return
+        self.right_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-    def select_tab(self, idx):
-        # Hide all frames and reset buttons
-        for i, frame in enumerate(self.tab_frames):
-            frame.pack_forget()
-            self.tab_buttons[i].config(bg="#111827", fg=TEXT_MUTED, highlightbackground=BORDER_COLOR)
-            
-        # Show active frame and highlight active button
-        self.tab_frames[idx].pack(fill="both", expand=True)
-        self.tab_buttons[idx].config(bg=BG_CARD, fg=VFD_ON, highlightbackground=VFD_ON_GLOW)
-
-    def show_tab_logic(self): pass
-    def show_tab_steps(self): pass
-    def show_tab_binary(self): pass
-    def show_tab_truth(self): pass
+    def bind_scroll_recursive(self, widget):
+        if not hasattr(self, 'step_flow') or widget != self.step_flow.text_area:
+            widget.bind("<MouseWheel>", self.on_main_scroll)
+        for child in widget.winfo_children():
+            self.bind_scroll_recursive(child)
 
     def create_keypad_button(self, parent, text, btn_type):
         if btn_type == 'num':
@@ -1613,7 +1224,6 @@ class CalculatorApplication(tk.Tk):
         self.active_char = char
         self.active_dp = dp
         
-        self.pin_mapper.draw_logic_state(char, dp, self.common_anode)
         self.decoder_details.update_decoder(char, dp, self.common_anode)
         self.truth_table.set_active_row(char, self.common_anode)
         
@@ -1625,15 +1235,12 @@ class CalculatorApplication(tk.Tk):
         
         self.step_flow.update_steps(a, b, op, rStr, disp_val)
         self.dec_to_bin.update_binary_tables(a, b, rStr, disp_val)
-        self.seg_encode.update_encoder_cards(disp_val, self.common_anode)
-        self.active_diagrams.update_diagrams(disp_val, self.common_anode)
+        
+        # Re-bind scrolling to include any new widgets
+        self.bind_scroll_recursive(self.right_container)
 
     def on_digit_hovered(self, digit_idx):
         self.update_system_state()
-
-    def on_pin_or_segment_hovered(self, hovered_seg):
-        self.vfd_screen.set_display_string(self.calc_engine.display_value, self.common_anode, active_seg=hovered_seg)
-        self.decoder_details.update_decoder(self.active_char, self.active_dp, self.common_anode, hovered_seg=hovered_seg)
 
     def on_truth_table_row_clicked(self, char):
         self.calc_engine.display_value = char
